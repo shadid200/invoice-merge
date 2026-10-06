@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice Merge</title>
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root {
+  --ink: #1F3A5F;
+  --ink-hover: #2B4C7E;
+  --paper: #FFFFFF;
+  --wash: #F3F5F8;
+  --line: #D9DEE5;
+  --text: #1C2430;
+  --muted: #5B6676;
+  --ok: #2E7D4F;
+  --ok-wash: #E7F3EC;
+  --warn: #8A5A00;
+  --warn-wash: #FBF1DC;
+  --bad: #B42318;
+  --bad-wash: #FDECEA;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #8FB3E3; --ink-hover: #A9C6EE; --paper: #1E2228; --wash: #262B33; --line: #3A414C;
+    --text: #E6EAF0; --muted: #A3ADBB; --ok: #6CC58F; --ok-wash: #1F3328; --warn: #E3B55B;
+    --warn-wash: #3A3020; --bad: #F08A80; --bad-wash: #3D2422;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--text); }
+body { font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 14px 14px 40px; }
+h1 { font-size: 17px; font-weight: 650; margin: 0 0 2px; letter-spacing: -0.01em; }
+.sub { color: var(--muted); margin: 0 0 14px; }
+
+.step { border-top: 1px solid var(--line); padding: 14px 0 6px; }
+.step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.num { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+       font-size: 12px; font-weight: 650; border: 1.5px solid var(--ink); color: var(--ink); }
+.step.done .num { background: var(--ink); color: var(--paper); }
+.step-head h2 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
+.step-head .meta { color: var(--muted); font-size: 12px; }
+
+label.field { display: block; margin: 0 0 10px; }
+label.field > span { display: block; font-weight: 550; margin-bottom: 3px; }
+label.field small, .hint { display: block; color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+input[type=text], input[type=email], select, textarea {
+  width: 100%; font: inherit; color: var(--text); background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px;
+}
+textarea { resize: vertical; min-height: 120px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, .filebtn:focus-within {
+  outline: 2px solid var(--ink); outline-offset: 1px;
+}
+
+button, .filebtn {
+  font: inherit; font-weight: 550; border-radius: var(--radius); padding: 7px 12px; cursor: pointer;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--paper); display: inline-block;
+}
+button:hover, .filebtn:hover { background: var(--ink-hover); border-color: var(--ink-hover); }
+button.ghost { background: transparent; color: var(--ink); }
+button.ghost:hover { background: var(--wash); }
+button.link { border: 0; background: none; color: var(--ink); padding: 0; text-decoration: underline; font-weight: 500; }
+button:disabled { opacity: .45; cursor: default; }
+.filebtn input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row + .row { margin-top: 8px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.chip { font-weight: 500; font-size: 12px; padding: 3px 8px; border-radius: 4px;
+        background: var(--wash); color: var(--ink); border: 1px solid var(--line); }
+.chip:hover { background: var(--line); border-color: var(--line); }
+
+.notice { border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; font-size: 12.5px; }
+.notice.ok { background: var(--ok-wash); color: var(--ok); }
+.notice.warn { background: var(--warn-wash); color: var(--warn); }
+.notice.bad { background: var(--bad-wash); color: var(--bad); }
+.notice.info { background: var(--wash); color: var(--text); }
+.notice ul { margin: 4px 0 0; padding-left: 18px; }
+
+details { margin: 4px 0 10px; }
+summary { cursor: pointer; font-weight: 550; color: var(--ink); margin-bottom: 8px; }
+
+.progress { height: 6px; background: var(--wash); border-radius: 3px; overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ink); transition: width .2s; }
+
+/* The stack of generated invoices */
+.list { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius); }
+.item { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center;
+        padding: 8px 10px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+.item .name { font-weight: 550; word-break: break-all; }
+.item .to { grid-column: 2 / 4; color: var(--muted); font-size: 12px; word-break: break-all; }
+.item .err { grid-column: 2 / 4; color: var(--bad); font-size: 12px; }
+.pill { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+.pill.ready { background: var(--wash); color: var(--muted); }
+.pill.sent { background: var(--ok-wash); color: var(--ok); }
+.pill.test { background: var(--warn-wash); color: var(--warn); }
+.pill.failed { background: var(--bad-wash); color: var(--bad); }
+.pill.sending { background: var(--wash); color: var(--ink); }
+.list-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px;
+             background: var(--wash); border-bottom: 1px solid var(--line); font-size: 12px; }
+
+.signed { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+          background: var(--wash); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 10px; }
+.check { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 12px; }
+.check input { margin-top: 3px; }
+
+/* Preview and confirm overlays */
+.overlay { position: fixed; inset: 0; background: var(--paper); display: none; flex-direction: column; z-index: 10; }
+.overlay.open { display: flex; }
+.overlay-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.overlay-bar .title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pages { flex: 1; overflow: auto; background: var(--wash); padding: 10px; }
+.pages canvas { display: block; width: 100%; height: auto; background: #fff; margin: 0 auto 10px;
+                box-shadow: 0 1px 3px rgba(20, 30, 45, .25); }
+.dialog { margin: auto; max-width: 300px; padding: 18px; }
+.dialog h3 { margin: 0 0 8px; font-size: 15px; }
+.dialog p { margin: 0 0 14px; }
+
+@media (prefers-reduced-motion: reduce) { .progress > div { transition: none; } }
+</style>
+</head>
+<body>
+
+<h1>Invoice Merge</h1>
+<p class="sub">One PDF per Excel row from this document, emailed through Microsoft 365.</p>
+
+<div id="startup"></div>
+
+<!-- 1. Data -->
+<section class="step" id="step1">
+  <div class="step-head"><span class="num">1</span><h2>Invoice data</h2><span class="meta" id="dataMeta"></span></div>
+  <div class="row">
+    <label class="filebtn">Choose Excel file<input type="file" id="file" accept=".xlsx,.xls,.csv"></label>
+    <button class="link" id="togglePaste" type="button">or paste rows</button>
+  </div>
+  <div id="pasteBox" hidden>
+    <label class="field" style="margin-top:10px"><span>Paste from Excel</span>
+      <textarea id="pasteText" placeholder="Copy the rows in Excel, including the header row, and paste here."></textarea>
+    </label>
+    <button type="button" class="ghost" id="usePaste">Use pasted rows</button>
+  </div>
+  <div id="dataInfo"></div>
+  <div id="columnsBox" hidden>
+    <p class="hint">Click a column to insert it at the cursor in your document, for example {{Name}}.</p>
+    <div class="chips" id="chips"></div>
+    <button type="button" class="ghost" id="checkTpl">Check document</button>
+  </div>
+  <div id="tplInfo"></div>
+</section>
+
+<!-- 2. Email -->
+<section class="step" id="step2">
+  <div class="step-head"><span class="num">2</span><h2>Email and file names</h2></div>
+  <label class="field"><span>Email column</span>
+    <select id="emailCol"><option value="">Load data first</option></select>
+    <small>Several addresses in one cell can be separated with ; or ,</small>
+  </label>
+  <label class="field"><span>PDF file name</span>
+    <input type="text" id="fileName">
+  </label>
+  <label class="field"><span>Subject</span>
+    <input type="text" id="subject">
+  </label>
+  <label class="field"><span>Message</span>
+    <textarea id="body"></textarea>
+    <small>Use {{Column}} anywhere in the file name, subject, message, Cc or Bcc.</small>
+  </label>
+  <label class="field"><span>Cc</span><input type="text" id="cc" placeholder="Optional"></label>
+  <label class="field"><span>Bcc</span><input type="text" id="bcc" placeholder="Optional, e.g. your own address"></label>
+
+  <details id="m365">
+    <summary>Microsoft 365 connection</summary>
+    <label class="field"><span>Application (client) ID</span>
+      <input type="text" id="clientId" placeholder="From the app registration">
+    </label>
+    <label class="field"><span>Directory (tenant) ID</span>
+      <input type="text" id="tenant" placeholder="organizations">
+    </label>
+    <label class="field"><span>Send from shared mailbox</span>
+      <input type="email" id="fromMailbox" placeholder="Optional, e.g. accounts@company.com">
+      <small>Leave empty to send from your own mailbox.</small>
+    </label>
+  </details>
+</section>
+
+<!-- 3. Generate -->
+<section class="step" id="step3">
+  <div class="step-head"><span class="num">3</span><h2>Create and review PDFs</h2><span class="meta" id="genMeta"></span></div>
+  <div class="row">
+    <button type="button" id="generate">Create PDFs</button>
+    <button type="button" class="ghost" id="cancelGen" hidden>Stop</button>
+  </div>
+  <div id="genProgress" hidden>
+    <div class="progress"><div id="genBar"></div></div>
+    <div class="hint" id="genText"></div>
+  </div>
+  <div id="genInfo"></div>
+  <div class="list" id="list" hidden>
+    <div class="list-head">
+      <span id="selCount"></span>
+      <span><button class="link" type="button" id="selAll">Select all</button>&nbsp;&nbsp;<button class="link" type="button" id="zip">Download all</button></span>
+    </div>
+    <div id="items"></div>
+  </div>
+</section>
+
+<!-- 4. Send -->
+<section class="step" id="step4">
+  <div class="step-head"><span class="num">4</span><h2>Send</h2><span class="meta" id="sendMeta"></span></div>
+  <div id="signedOut">
+    <button type="button" id="signIn">Sign in with Microsoft</button>
+  </div>
+  <div id="signedIn" hidden>
+    <div class="signed"><span id="who"></span><button class="link" type="button" id="signOut">Sign out</button></div>
+  </div>
+  <label class="check"><input type="checkbox" id="testMode" checked>
+    <span><strong>Test run</strong><br><span class="hint" style="margin:0">Every email goes to you, with the customer's address in the subject. Uncheck for the real send.</span></span>
+  </label>
+  <button type="button" id="send" disabled>Send emails</button>
+  <div class="progress" id="sendProgress" hidden><div id="sendBar"></div></div>
+  <div id="sendInfo"></div>
+</section>
+
+<!-- Preview -->
+<div class="overlay" id="preview" role="dialog" aria-modal="true" aria-label="PDF preview">
+  <div class="overlay-bar">
+    <button class="ghost" type="button" id="prevBtn" aria-label="Previous invoice">‹</button>
+    <span class="title" id="previewTitle"></span>
+    <button class="ghost" type="button" id="nextBtn" aria-label="Next invoice">›</button>
+    <button type="button" id="closePreview">Close</button>
+  </div>
+  <div class="pages" id="pages"></div>
+</div>
+
+<!-- Confirm -->
+<div class="overlay" id="confirm" role="dialog" aria-modal="true">
+  <div class="dialog">
+    <h3 id="confirmTitle"></h3>
+    <p id="confirmText"></p>
+    <div class="row">
+      <button type="button" id="confirmYes"></button>
+      <button type="button" class="ghost" id="confirmNo">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- Settings ---------------- */
+const SKEY = "invoiceMergeSettings";
+const DEFAULTS = {
+  emailCol: "Email",
+  fileName: "Invoice_{{InvoiceNo}}",
+  subject: "Invoice {{InvoiceNo}}",
+  body: "Dear {{Name}},\n\nPlease find attached invoice {{InvoiceNo}} for {{Amount}}, due on {{DueDate}}.\n\nIf you have any questions, just reply to this email.\n\nKind regards,\nAccounts Team",
+  cc: "", bcc: "", fromMailbox: "", clientId: "", tenant: "organizations"
+};
+const FORM_KEYS = ["fileName", "subject", "body", "cc", "bcc", "fromMailbox", "clientId", "tenant"];
+const MARK = "imm:";                 // tag prefix for the add-in's temporary content controls
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+const $ = id => document.getElementById(id);
+const state = { headers: [], rows: [], items: [], settings: {}, token: null, tokenExp: 0, me: null,
+                cancel: false, busy: false, previewIndex: -1 };
+
+function loadSettings() {
+  let local = {}, doc = {};
+  try { local = JSON.parse(localStorage.getItem(SKEY) || "{}"); } catch (e) {}
+  try { doc = Office.context.document.settings.get(SKEY) || {}; } catch (e) {}
+  return Object.assign({}, DEFAULTS, local, doc);
+}
+function readForm() {
+  const s = Object.assign({}, state.settings);
+  FORM_KEYS.forEach(k => s[k] = $(k).value);
+  s.emailCol = $("emailCol").value || s.emailCol;
+  s.tenant = (s.tenant || "").trim() || "organizations";
+  s.clientId = (s.clientId || "").trim();
+  s.fromMailbox = (s.fromMailbox || "").trim();
+  return s;
+}
+let saveTimer;
+function saveSettings() {
+  state.settings = readForm();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(SKEY, JSON.stringify(state.settings)); } catch (e) {}
+    try {
+      Office.context.document.settings.set(SKEY, state.settings);
+      Office.context.document.settings.saveAsync(() => {});
+    } catch (e) {}
+  }, 400);
+  return state.settings;
+}
+function fillForm() {
+  FORM_KEYS.forEach(k => $(k).value = state.settings[k] || "");
+  if (!state.settings.clientId) $("m365").open = true;
+}
+
+/* ---------------- Helpers ---------------- */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function notice(el, kind, html) { $(el).innerHTML = html ? `<div class="notice ${kind}">${html}</div>` : ""; }
+function fill(tpl, row) {
+  return String(tpl || "").replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (m, k) => (k in row ? row[k] : m));
+}
+function namesIn(text) {
+  return [...String(text || "").matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(m => m[1]);
+}
+function splitEmails(cell) { return String(cell || "").split(/[;,]/).map(x => x.trim()).filter(Boolean); }
+function safeName(s) { return (s.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").trim() || "invoice").slice(0, 120); }
+function sizeText(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function toBase64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function setStepDone(n, done) { $("step" + n).classList.toggle("done", !!done); }
+
+function confirmBox(title, text, yesLabel) {
+  return new Promise(resolve => {
+    $("confirmTitle").textContent = title;
+    $("confirmText").textContent = text;
+    $("confirmYes").textContent = yesLabel;
+    $("confirm").classList.add("open");
+    const done = v => { $("confirm").classList.remove("open"); $("confirmYes").onclick = $("confirmNo").onclick = null; resolve(v); };
+    $("confirmYes").onclick = () => done(true);
+    $("confirmNo").onclick = () => done(false);
+    $("confirmYes").focus();
+  });
+}
+
+/* ---------------- 1. Data ---------------- */
+function setData(rawRows) {
+  const rows = [];
+  const headers = [];
+  rawRows.forEach((r, idx) => {
+    const clean = {};
+    let any = false;
+    Object.keys(r).forEach(k => {
+      const key = String(k).trim();
+      if (!key || key.startsWith("__EMPTY")) return;
+      const v = String(r[k] == null ? "" : r[k]).trim();
+      clean[key] = v;
+      if (v) any = true;
+      if (!headers.includes(key)) headers.push(key);
+    });
+    if (any) {
+      clean.__row = (typeof r.__rowNum__ === "number") ? r.__rowNum__ + 1 : idx + 2;
+      rows.push(clean);
+    }
+  });
+  rows.forEach(r => headers.forEach(h => { if (!(h in r)) r[h] = ""; }));
+  state.headers = headers;
+  state.rows = rows;
+  clearItems();
+
+  if (!rows.length) {
+    notice("dataInfo", "bad", "No rows found. The first row should hold the column names, with one invoice per row below it.");
+    $("columnsBox").hidden = true;
+    $("dataMeta").textContent = "";
+    setStepDone(1, false);
+    return;
+  }
+  $("dataMeta").textContent = `${rows.length} invoice${rows.length === 1 ? "" : "s"}`;
+  notice("dataInfo", "ok", `Loaded ${rows.length} row${rows.length === 1 ? "" : "s"} with ${headers.length} columns.`);
+  $("chips").innerHTML = headers.map(h => `<button type="button" class="chip" data-col="${esc(h)}">${esc(h)}</button>`).join("");
+  $("columnsBox").hidden = false;
+
+  const sel = $("emailCol");
+  sel.innerHTML = headers.map(h => `<option>${esc(h)}</option>`).join("");
+  const preferred = headers.find(h => h === state.settings.emailCol)
+                 || headers.find(h => /e-?mail/i.test(h)) || headers[0];
+  sel.value = preferred;
+  saveSettings();
+  setStepDone(1, true);
+  checkTemplate(true);
+}
+
+async function onFile(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    setData(XLSX.utils.sheet_to_json(ws, { raw: false, defval: "" }));
+    $("dataMeta").textContent += ` from ${f.name}`;
+  } catch (err) {
+    notice("dataInfo", "bad", "Couldn't read that file: " + esc(err.message));
+  }
+  e.target.value = "";
+}
+
+function onPaste() {
+  const lines = $("pasteText").value.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) { notice("dataInfo", "bad", "Paste the header row and at least one invoice row."); return; }
+  const heads = lines[0].split("\t");
+  const rows = lines.slice(1).map(l => {
+    const cells = l.split("\t"); const o = {};
+    heads.forEach((h, i) => o[h] = cells[i] || "");
+    return o;
+  });
+  setData(rows);
+  $("pasteBox").hidden = true;
+}
+
+async function insertColumn(name) {
+  try {
+    await Word.run(async ctx => {
+      ctx.document.getSelection().insertText(`{{${name}}}`, "Replace");
+      await ctx.sync();
+    });
+  } catch (e) { notice("tplInfo", "bad", "Couldn't insert into the document: " + esc(e.message)); }
+}
+
+/* ---------------- Word document handling ---------------- */
+async function getBodies(ctx) {
+  const sections = ctx.document.sections;
+  sections.load("items");
+  await ctx.sync();
+  const bodies = [ctx.document.body];
+  sections.items.forEach(s => {
+    ["Primary", "FirstPage"].forEach(t => { bodies.push(s.getHeader(t)); bodies.push(s.getFooter(t)); });
+  });
+  return bodies;
+}
+
+// Placeholders typed in the document: Map of exact text -> column name
+async function scanTokens(ctx) {
+  const bodies = await getBodies(ctx);
+  bodies.forEach(b => b.load("text"));
+  await ctx.sync();
+  const tokens = new Map();
+  bodies.forEach(b => {
+    for (const m of String(b.text || "").matchAll(/\{\{([^{}]+?)\}\}/g)) tokens.set(m[0], m[1].trim());
+  });
+  return tokens;
+}
+
+// Put each known placeholder in a hidden content control so its value can be swapped per invoice.
+async function wrapTokens(ctx, tokens) {
+  const bodies = await getBodies(ctx);
+  for (const b of bodies) {
+    const searches = [];
+    tokens.forEach((name, raw) => {
+      const r = b.search(raw, { matchCase: true });
+      r.load("items");
+      searches.push({ raw, name, r });
+    });
+    await ctx.sync();
+    const found = [];
+    searches.forEach(s => s.r.items.forEach(rng => {
+      const parent = rng.parentContentControlOrNullObject;
+      parent.load("tag");
+      found.push({ raw: s.raw, name: s.name, rng, parent });
+    }));
+    await ctx.sync();
+    found.forEach(f => {
+      if (!f.parent.isNullObject && String(f.parent.tag || "").startsWith(MARK)) return;
+      const cc = f.rng.insertContentControl();
+      cc.tag = MARK + f.name;
+      cc.title = f.raw;
+      cc.appearance = "Hidden";
+    });
+    await ctx.sync();
+  }
+  const cols = bodies.map(b => { const c = b.contentControls; c.load("items/tag"); return c; });
+  await ctx.sync();
+  return cols.flatMap(c => c.items.filter(x => String(x.tag || "").startsWith(MARK)));
+}
+
+// Put the original {{placeholders}} back and remove the temporary controls.
+async function restoreTokens(ctx) {
+  const bodies = await getBodies(ctx);
+  let restored = 0;
+  for (const b of bodies) {
+    const c = b.contentControls;
+    c.load("items/tag,items/title");
+    await ctx.sync();
+    c.items.forEach(cc => {
+      if (!String(cc.tag || "").startsWith(MARK)) return;
+      cc.insertText(cc.title || `{{${cc.tag.slice(MARK.length)}}}`, "Replace");
+      cc.delete(true);
+      restored++;
+    });
+    await ctx.sync();
+  }
+  return restored;
+}
+
+async function checkTemplate(quiet) {
+  try {
+    const tokens = await Word.run(async ctx => scanTokens(ctx));
+    const names = [...new Set(tokens.values())];
+    if (!names.length) {
+      notice("tplInfo", "warn", "No {{placeholders}} in this document yet. Click a column above to insert one where the value should go.");
+      return { ok: false, tokens };
+    }
+    const unknown = state.headers.length ? names.filter(n => !state.headers.includes(n)) : [];
+    if (unknown.length) {
+      notice("tplInfo", "bad", "These placeholders don't match any column. Fix the spelling in the document or the Excel header:<ul>"
+        + unknown.map(n => `<li>{{${esc(n)}}}</li>`).join("") + "</ul>");
+      return { ok: false, tokens };
+    }
+    if (!quiet || state.headers.length) {
+      notice("tplInfo", "ok", `Document uses ${names.length} column${names.length === 1 ? "" : "s"}: ${names.map(esc).join(", ")}.`);
+    }
+    return { ok: true, tokens };
+  } catch (e) {
+    notice("tplInfo", "bad", "Couldn't read the document: " + esc(e.message));
+    return { ok: false, tokens: new Map() };
+  }
+}
+
+/* ---------------- 3. Create PDFs ---------------- */
+function getPdf() {
+  return new Promise((resolve, reject) => {
+    Office.context.document.getFileAsync(Office.FileType.Pdf, { sliceSize: 4194304 }, res => {
+      if (res.status !== Office.AsyncResultStatus.Succeeded) return reject(new Error(res.error.message));
+      const file = res.value;
+      const parts = [];
+      const next = i => file.getSliceAsync(i, s => {
+        if (s.status !== Office.AsyncResultStatus.Succeeded) { file.closeAsync(); return reject(new Error(s.error.message)); }
+        parts.push(new Uint8Array(s.value.data));
+        if (i + 1 < file.sliceCount) return next(i + 1);
+        file.closeAsync();
+        const total = parts.reduce((n, p) => n + p.length, 0);
+        const out = new Uint8Array(total);
+        let off = 0;
+        parts.forEach(p => { out.set(p, off); off += p.length; });
+        resolve(out);
+      });
+      next(0);
+    });
+  });
+}
+
+function validateForGenerate(s) {
+  const problems = [];
+  if (!state.rows.length) problems.push("Load the invoice data first (step 1).");
+  if (!state.headers.includes(s.emailCol)) problems.push("Choose the email column (step 2).");
+  const used = [s.fileName, s.subject, s.body, s.cc, s.bcc].flatMap(namesIn);
+  const unknown = [...new Set(used.filter(n => !state.headers.includes(n)))];
+  if (state.rows.length && unknown.length) problems.push("Step 2 uses names that aren't columns: " + unknown.map(n => `{{${esc(n)}}}`).join(", "));
+  if (!String(s.fileName).trim()) problems.push("Enter a PDF file name pattern (step 2).");
+  if (state.headers.includes(s.emailCol)) {
+    const bad = state.rows.filter(r => { const e = splitEmails(r[s.emailCol]); return !e.length || !e.every(x => EMAIL_RE.test(x)); });
+    if (bad.length) problems.push("Missing or invalid email in Excel row " + bad.slice(0, 12).map(r => r.__row).join(", ") + (bad.length > 12 ? "…" : ""));
+  }
+  return problems;
+}
+
+function clearItems() {
+  state.items = [];
+  renderItems();
+  $("genMeta").textContent = "";
+  notice("genInfo");
+  setStepDone(3, false);
+}
+
+async function generate() {
+  if (state.busy) return;
+  const s = saveSettings();
+  const problems = validateForGenerate(s);
+  if (problems.length) { notice("genInfo", "bad", "<ul>" + problems.map(p => `<li>${p}</li>`).join("") + "</ul>"); return; }
+  const check = await checkTemplate(false);
+  if (!check.ok) { notice("genInfo", "bad", "Fix the document placeholders first (see step 1)."); return; }
+
+  state.busy = true;
+  state.cancel = false;
+  clearItems();
+  $("generate").disabled = true;
+  $("cancelGen").hidden = false;
+  $("genProgress").hidden = false;
+  $("genBar").style.width = "0";
+
+  const names = new Set();
+  const items = [];
+  let error = null;
+  try {
+    await Word.run(async ctx => {
+      await restoreTokens(ctx);                        // tidy up after any interrupted run
+      const controls = await wrapTokens(ctx, check.tokens);
+      try {
+        for (let i = 0; i < state.rows.length; i++) {
+          if (state.cancel) break;
+          const row = state.rows[i];
+          $("genText").textContent = `Creating ${i + 1} of ${state.rows.length}`;
+          controls.forEach(cc => {
+            const v = String(row[cc.tag.slice(MARK.length)] ?? "").replace(/\r?\n/g, "\u000B");
+            cc.insertText(v || "\u200B", "Replace");
+          });
+          await ctx.sync();
+          const bytes = await getPdf();
+
+          let base = safeName(fill(s.fileName, row)), name = base, n = 2;
+          while (names.has(name.toLowerCase())) name = `${base}_${n++}`;
+          names.add(name.toLowerCase());
+
+          items.push({ row, name: name + ".pdf", to: splitEmails(row[s.emailCol]), bytes,
+                       include: true, status: "ready", error: "" });
+          $("genBar").style.width = ((i + 1) / state.rows.length * 100) + "%";
+        }
+      } finally {
+        await restoreTokens(ctx);
+      }
+    });
+  } catch (e) {
+    error = e;
+  }
+
+  state.items = items;
+  state.busy = false;
+  $("generate").disabled = false;
+  $("cancelGen").hidden = true;
+  $("genProgress").hidden = true;
+  renderItems();
+
+  if (error) {
+    notice("genInfo", "bad", `Stopped after ${items.length} PDF${items.length === 1 ? "" : "s"}: ${esc(error.message)}`);
+  } else if (state.cancel) {
+    notice("genInfo", "warn", `Stopped. ${items.length} PDF${items.length === 1 ? "" : "s"} created.`);
+  } else {
+    notice("genInfo", "ok", `${items.length} PDFs created. Open a few to check them before sending.`);
+    setStepDone(3, true);
+  }
+  $("genMeta").textContent = items.length ? `${items.length} PDFs` : "";
+}
+
+function renderItems() {
+  const box = $("items");
+  $("list").hidden = !state.items.length;
+  box.innerHTML = state.items.map((it, i) => `
+    <div class="item">
+      <input type="checkbox" data-i="${i}" ${it.include ? "checked" : ""} aria-label="Include ${esc(it.name)}">
+      <button class="link name" type="button" data-preview="${i}">${esc(it.name)}</button>
+      <span class="pill ${it.status}">${{ ready: "Ready", sent: "Sent", test: "Test sent", failed: "Failed", sending: "Sending" }[it.status]}</span>
+      <span class="to">${esc(it.to.join(", "))}, ${sizeText(it.bytes.length)}</span>
+      ${it.error ? `<span class="err">${esc(it.error)}</span>` : ""}
+    </div>`).join("");
+  const n = state.items.filter(i => i.include).length;
+  $("selCount").textContent = `${n} of ${state.items.length} selected`;
+  updateSendButton();
+}
+
+/* ---------------- Preview ---------------- */
+async function openPreview(i) {
+  if (i < 0 || i >= state.items.length) return;
+  state.previewIndex = i;
+  const it = state.items[i];
+  $("previewTitle").textContent = `${it.name} (${i + 1} of ${state.items.length})`;
+  $("prevBtn").disabled = i === 0;
+  $("nextBtn").disabled = i === state.items.length - 1;
+  $("preview").classList.add("open");
+  const pages = $("pages");
+  pages.innerHTML = "";
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: it.bytes.slice() }).promise;
+    if (state.previewIndex !== i) return;
+    const width = Math.max(280, pages.clientWidth - 20);
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const base = page.getViewport({ scale: 1 });
+      const scale = (width / base.width) * (window.devicePixelRatio || 1);
+      const vp = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = vp.width; canvas.height = vp.height;
+      pages.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+      if (state.previewIndex !== i) return;
+    }
+  } catch (e) {
+    pages.innerHTML = `<div class="notice bad">Couldn't show this PDF: ${esc(e.message)}</div>`;
+  }
+}
+function closePreview() { state.previewIndex = -1; $("preview").classList.remove("open"); }
+
+async function downloadZip() {
+  try {
+    const zip = new JSZip();
+    state.items.forEach(it => zip.file(it.name, it.bytes));
+    const blob = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "invoices.zip";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  } catch (e) {
+    notice("genInfo", "bad", "Download isn't available here: " + esc(e.message));
+  }
+}
+
+/* ---------------- 4. Sign in and send ---------------- */
+function signIn() {
+  const s = saveSettings();
+  if (!s.clientId) {
+    $("m365").open = true;
+    notice("sendInfo", "bad", "Enter the Application (client) ID under Microsoft 365 connection in step 2.");
+    return;
+  }
+  const url = new URL("auth.html", location.href);
+  url.searchParams.set("client", s.clientId);
+  url.searchParams.set("tenant", s.tenant);
+  url.searchParams.set("shared", s.fromMailbox ? "1" : "0");
+  Office.context.ui.displayDialogAsync(url.href, { height: 65, width: 35, promptBeforeOpen: false }, res => {
+    if (res.status !== Office.AsyncResultStatus.Succeeded) {
+      notice("sendInfo", "bad", "Couldn't open the sign-in window: " + esc(res.error.message));
+      return;
+    }
+    const dlg = res.value;
+    dlg.addEventHandler(Office.EventType.DialogMessageReceived, async arg => {
+      dlg.close();
+      let msg = {};
+      try { msg = JSON.parse(arg.message); } catch (e) {}
+      if (msg.error || !msg.token) { notice("sendInfo", "bad", "Sign-in failed: " + esc(msg.error || "no token")); return; }
+      state.token = msg.token;
+      state.tokenExp = Date.now() + (msg.expiresIn || 3600) * 1000;
+      try {
+        const r = await fetch("https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName",
+                              { headers: { Authorization: "Bearer " + state.token } });
+        const me = await r.json();
+        if (!r.ok) throw new Error(me.error && me.error.message || r.status);
+        state.me = { name: me.displayName, mail: me.mail || me.userPrincipalName };
+      } catch (e) {
+        state.token = null;
+        notice("sendInfo", "bad", "Signed in, but couldn't read your profile: " + esc(e.message));
+        return;
+      }
+      notice("sendInfo");
+      renderSignIn();
+    });
+    dlg.addEventHandler(Office.EventType.DialogEventReceived, () => {
+      notice("sendInfo", "warn", "Sign-in window was closed before finishing.");
+    });
+  });
+}
+function signOut() { state.token = null; state.me = null; renderSignIn(); }
+function renderSignIn() {
+  const on = !!(state.token && state.me);
+  $("signedOut").hidden = on;
+  $("signedIn").hidden = !on;
+  if (on) {
+    const from = state.settings.fromMailbox;
+    $("who").innerHTML = `Signed in as <strong>${esc(state.me.mail)}</strong>` + (from ? `<br><span class="hint" style="margin:0">Sending from ${esc(from)}</span>` : "");
+  }
+  updateSendButton();
+}
+function toSend() {
+  const test = $("testMode").checked;
+  return state.items.filter(it => it.include && (test || it.status !== "sent"));
+}
+function updateSendButton() {
+  const n = toSend().length;
+  const test = $("testMode").checked;
+  $("send").textContent = n ? (test ? `Send ${n} test email${n === 1 ? "" : "s"} to me` : `Send ${n} email${n === 1 ? "" : "s"}`) : "Send emails";
+  $("send").disabled = !(state.token && n && !state.busy);
+}
+
+async function graphSend(it, test) {
+  const s = state.settings;
+  const row = it.row;
+  const recipients = list => list.map(a => ({ emailAddress: { address: a } }));
+  let subject = fill(s.subject, row);
+  const message = {
+    subject,
+    body: { contentType: "Text", content: fill(s.body, row) },
+    toRecipients: recipients(test ? [state.me.mail] : it.to),
+    attachments: [{
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: it.name, contentType: "application/pdf", contentBytes: toBase64(it.bytes)
+    }]
+  };
+  if (test) {
+    message.subject = `[TEST to ${it.to.join(", ")}] ${subject}`;
+  } else {
+    const cc = splitEmails(fill(s.cc, row)), bcc = splitEmails(fill(s.bcc, row));
+    if (cc.length) message.ccRecipients = recipients(cc);
+    if (bcc.length) message.bccRecipients = recipients(bcc);
+  }
+  const url = s.fromMailbox
+    ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(s.fromMailbox)}/sendMail`
+    : "https://graph.microsoft.com/v1.0/me/sendMail";
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ message, saveToSentItems: true })
+    });
+    if (r.ok) return;
+    if ((r.status === 429 || r.status === 503) && attempt < 4) {
+      await sleep((parseInt(r.headers.get("Retry-After"), 10) || 5) * 1000);
+      continue;
+    }
+    let detail = String(r.status);
+    try { const j = await r.json(); detail = (j.error && j.error.message) || detail; } catch (e) {}
+    if (r.status === 401) detail = "Your sign-in expired. Sign in again and resend the failed ones.";
+    if (r.status === 403) detail = "Not allowed to send" + (s.fromMailbox ? ` from ${s.fromMailbox}` : "") + ": " + detail;
+    throw new Error(detail);
+  }
+}
+
+async function sendAll() {
+  if (state.busy) return;
+  const s = saveSettings();
+  const test = $("testMode").checked;
+  const list = toSend();
+  if (!list.length) return;
+  if (Date.now() > state.tokenExp - 60000) { signOut(); notice("sendInfo", "warn", "Your sign-in expired. Sign in again."); return; }
+  const big = list.filter(it => it.bytes.length > 3 * 1048576);
+  if (big.length) { notice("sendInfo", "bad", "These PDFs are over 3 MB, which is too large to send this way: " + big.map(b => esc(b.name)).join(", ")); return; }
+
+  if (!test) {
+    const ok = await confirmBox(
+      `Send ${list.length} invoice${list.length === 1 ? "" : "s"}?`,
+      `Each customer gets their PDF by email from ${s.fromMailbox || state.me.mail}. This can't be undone.`,
+      `Send ${list.length} email${list.length === 1 ? "" : "s"}`);
+    if (!ok) return;
+  }
+
+  state.busy = true;
+  updateSendButton();
+  $("generate").disabled = true;
+  $("sendProgress").hidden = false;
+  $("sendBar").style.width = "0";
+  let sent = 0, failed = 0;
+  for (let i = 0; i < list.length; i++) {
+    const it = list[i];
+    const before = it.status;
+    it.status = "sending"; it.error = ""; renderItems();
+    try {
+      await graphSend(it, test);
+      it.status = test ? (before === "sent" ? "sent" : "test") : "sent";
+      if (!test) it.include = false;
+      sent++;
+    } catch (e) {
+      it.status = "failed"; it.error = e.message; failed++;
+    }
+    $("sendBar").style.width = ((i + 1) / list.length * 100) + "%";
+    renderItems();
+    await sleep(600);
+  }
+  state.busy = false;
+  $("generate").disabled = false;
+  $("sendProgress").hidden = true;
+  renderItems();
+  const where = test ? `to ${esc(state.me.mail)}` : "to customers";
+  if (failed) notice("sendInfo", "bad", `${sent} sent ${where}, ${failed} failed. The failed ones stay selected so you can send them again.`);
+  else notice("sendInfo", "ok", `${sent} email${sent === 1 ? "" : "s"} sent ${where}.` + (test ? " Check your inbox, then uncheck Test run to send for real." : ""));
+  $("sendMeta").textContent = state.items.filter(i => i.status === "sent").length + " sent";
+  if (!test && !failed) setStepDone(4, true);
+}
+
+/* ---------------- Wire up ---------------- */
+Office.onReady(async info => {
+  if (info.host !== Office.HostType.Word) {
+    notice("startup", "bad", "Open this from Word: Home tab, Invoice Merge.");
+    return;
+  }
+  if (!Office.context.requirements.isSetSupported("WordApi", "1.3")) {
+    notice("startup", "bad", "This version of Word is too old for the add-in. Update Word and try again.");
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  state.settings = loadSettings();
+  fillForm();
+
+  $("file").addEventListener("change", onFile);
+  $("togglePaste").onclick = () => { $("pasteBox").hidden = !$("pasteBox").hidden; };
+  $("usePaste").onclick = onPaste;
+  $("chips").addEventListener("click", e => { const b = e.target.closest("[data-col]"); if (b) insertColumn(b.dataset.col); });
+  $("checkTpl").onclick = () => checkTemplate(false);
+  FORM_KEYS.concat("emailCol").forEach(k => $(k).addEventListener("input", saveSettings));
+  $("fromMailbox").addEventListener("change", () => { if (state.token) { signOut(); notice("sendInfo", "info", "Mailbox changed. Sign in again."); } });
+
+  $("generate").onclick = generate;
+  $("cancelGen").onclick = () => { state.cancel = true; };
+  $("items").addEventListener("change", e => {
+    const i = e.target.dataset.i;
+    if (i != null) { state.items[i].include = e.target.checked; renderItems(); }
+  });
+  $("items").addEventListener("click", e => { const b = e.target.closest("[data-preview]"); if (b) openPreview(+b.dataset.preview); });
+  $("selAll").onclick = () => {
+    const all = state.items.every(i => i.include);
+    state.items.forEach(i => i.include = !all);
+    $("selAll").textContent = all ? "Select all" : "Select none";
+    renderItems();
+  };
+  $("zip").onclick = downloadZip;
+  $("closePreview").onclick = closePreview;
+  $("prevBtn").onclick = () => openPreview(state.previewIndex - 1);
+  $("nextBtn").onclick = () => openPreview(state.previewIndex + 1);
+  document.addEventListener("keydown", e => {
+    if (!$("preview").classList.contains("open")) return;
+    if (e.key === "Escape") closePreview();
+    if (e.key === "ArrowLeft") openPreview(state.previewIndex - 1);
+    if (e.key === "ArrowRight") openPreview(state.previewIndex + 1);
+  });
+
+  $("signIn").onclick = signIn;
+  $("signOut").onclick = signOut;
+  $("testMode").onchange = updateSendButton;
+  $("send").onclick = sendAll;
+
+  // If an earlier run was interrupted, put the placeholders back.
+  try {
+    const n = await Word.run(ctx => restoreTokens(ctx));
+    if (n) notice("startup", "info", "Restored the {{placeholders}} left over from an interrupted run.");
+  } catch (e) {}
+  checkTemplate(true);
+});
+</script>
+</body>
+</html>
